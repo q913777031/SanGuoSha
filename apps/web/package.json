@@ -1,0 +1,29 @@
+{
+  "name": "@sgs/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "三国杀网页客户端(手机优先,PWA)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build:artifact": "ARTIFACT=1 vite build && node scripts/build-artifact.mjs"
+  },
+  "dependencies": {
+    "@sgs/ai": "workspace:*",
+    "@sgs/engine": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.2",
+    "vite-plugin-pwa": "^2.0.0"
+  }
+}

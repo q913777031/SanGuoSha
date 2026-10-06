@@ -1,0 +1,18 @@
+{
+  "name": "@sgs/sim",
+  "version": "0.0.0",
+  "private": true,
+  "description": "无头模拟器:AI 对 AI 批量对局,校验引擎不变量",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@sgs/ai": "workspace:*",
+    "@sgs/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}
