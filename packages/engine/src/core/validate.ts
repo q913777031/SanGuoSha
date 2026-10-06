@@ -176,7 +176,8 @@ function validateArrange(request: ArrangeRequest, response: Response): Verdict {
 
 /** 校验一条应答是否对该请求合法:id / kind 匹配、选项落在候选内、数量在范围内、目标满足 filter */
 export function validateResponse(ctx: Ctx, request: Request, response: Response): Verdict {
-  if (typeof response !== 'object') return fail('应答必须是对象')
+  // typeof null === 'object',null 必须单独排除,否则下一行读 requestId 抛 TypeError
+  if (typeof response !== 'object' || response === null) return fail('应答必须是对象')
   if (response.requestId !== request.id) {
     return fail(`requestId ${response.requestId} 与当前请求 ${request.id} 不符`)
   }
