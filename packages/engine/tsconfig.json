@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@sgs/ai": ["../ai/src/index.ts"]
+    }
   },
   "include": ["src", "test", "vitest.config.ts"]
 }
