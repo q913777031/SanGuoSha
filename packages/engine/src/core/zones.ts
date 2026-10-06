@@ -7,6 +7,7 @@ import { guardFlow } from './flow.js'
 import type {
   CardId,
   CardMove,
+  CardName,
   CardMoveDraft,
   CardsMoveEvent,
   Ctx,
@@ -72,6 +73,7 @@ function* moveCardsBody(ctx: Ctx, drafts: CardMoveDraft[]): Flow<CardsMoveEvent>
       reason: d.reason,
       position: d.position ?? 'top',
       visibleTo: moveVisibility(from, d.to),
+      as: d.as ?? null,
     }
   })
   return yield* runEvent(ctx, { kind: 'CardsMove', moves })
@@ -89,9 +91,12 @@ function removeFrom(state: GameState, card: CardId, zone: Zone): void {
     case 'hand':
       ok = take(playerAt(state, zone.player).hand)
       break
-    case 'judge':
-      ok = take(playerAt(state, zone.player).judgeArea)
+    case 'judge': {
+      const p = playerAt(state, zone.player)
+      ok = take(p.judgeArea)
+      delete p.judgeAs[String(card)]
       break
+    }
     case 'equip': {
       const p = playerAt(state, zone.player)
       for (const slot of EQUIP_SLOTS) {
@@ -115,15 +120,25 @@ function removeFrom(state: GameState, card: CardId, zone: Zone): void {
   if (!ok) throw new EngineError(`牌 ${card} 不在预期的来源区域 ${zone.kind}`)
 }
 
-function addTo(ctx: Ctx, card: CardId, zone: Zone, position: 'top' | 'bottom'): void {
+function addTo(
+  ctx: Ctx,
+  card: CardId,
+  zone: Zone,
+  position: 'top' | 'bottom',
+  as: CardName | null,
+): void {
   const state = ctx.state
   switch (zone.kind) {
     case 'hand':
       playerAt(state, zone.player).hand.push(card)
       break
-    case 'judge':
-      playerAt(state, zone.player).judgeArea.push(card)
+    case 'judge': {
+      const p = playerAt(state, zone.player)
+      p.judgeArea.push(card)
+      // 转化而来的延时锦囊(国色当乐)记住牌名,判定阶段按它结算
+      if (as !== null && as !== ctx.registry.spec(card).name) p.judgeAs[String(card)] = as
       break
+    }
     case 'equip': {
       const def = ctx.registry.card(ctx.registry.spec(card).name)
       if (def === null || def.equip === null) throw new EngineError(`牌 ${card} 不是可装备的牌`)
@@ -167,7 +182,7 @@ export function applyMoves(ctx: Ctx, moves: CardMove[]): void {
     m.from = from
     m.visibleTo = moveVisibility(from, m.to)
     removeFrom(ctx.state, m.card, from)
-    addTo(ctx, m.card, m.to, m.position)
+    addTo(ctx, m.card, m.to, m.position, m.as)
   }
 }
 

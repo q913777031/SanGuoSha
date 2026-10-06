@@ -111,18 +111,27 @@ function buildRegistry(entries: DeckEntry[], packages: ContentPackage[]): Regist
       if (!has(skills, id)) throw new EngineError(`武将 ${g.id} 引用了未注册的技能 ${id}`)
     }
   }
+  // 已知时机 = 内置时机 + 各内容包登记的自定义时机(declare module 合并进 TimingEventMap 的键)
+  const known: string[] = [...TIMINGS]
+  for (const pkg of packages) {
+    for (const t of pkg.timings ?? []) if (!known.includes(t)) known.push(t)
+  }
   const timingIndex: Record<string, TriggerSkill[]> = {}
-  for (const t of TIMINGS) timingIndex[t] = []
+  for (const t of known) timingIndex[t] = []
   for (const s of Object.values(skills)) {
     if (s.type !== 'trigger') continue
     for (const t of s.timings) {
       const bucket = timingIndex[t]
-      if (bucket === undefined) throw new EngineError(`技能 ${s.id} 声明了未知时机 ${String(t)}`)
+      if (bucket === undefined) {
+        throw new EngineError(
+          `技能 ${s.id} 声明了未知时机 ${String(t)}(自定义时机须在 ContentPackage.timings 登记)`,
+        )
+      }
       bucket.push(s)
     }
   }
   const priorityIndex: Record<string, number[]> = {}
-  for (const t of TIMINGS) {
+  for (const t of known) {
     const prios = [0]
     for (const s of timingIndex[t] ?? []) if (!prios.includes(s.priority)) prios.push(s.priority)
     prios.sort((a, b) => b - a)

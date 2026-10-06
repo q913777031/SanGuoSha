@@ -50,6 +50,7 @@ export {
   usedInPlay,
   maxHandCards,
   faceOf,
+  judgeFaceOf,
   faceToJson,
   zoneToJson,
   handCount,

@@ -111,6 +111,7 @@ describe('createInitialState 结构', () => {
         hand: [],
         equips: { weapon: null, armor: null, horse_offensive: null, horse_defensive: null },
         judgeArea: [],
+        judgeAs: {},
         skills: [],
         flags: {},
         marks: {},

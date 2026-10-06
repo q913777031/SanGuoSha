@@ -9,6 +9,7 @@ import {
   defaultNullifiable,
   faceOf,
   handCandidates,
+  judgeFaceOf,
   maxHandCards,
   nextAlive,
   playerOf,
@@ -41,9 +42,13 @@ export function* runGame(ctx: Ctx): Flow<void> {
       // 先取快照再出队:恢复时从 base 重算 next 才能得到同一名玩家(额外回合队列不会被消费两次)
       ctx.onTurnBoundary()
       const queued = s.turnQueue.shift()
-      const next = queued ?? nextAlive(s, s.lastTurnPlayer)
+      const regular = s.lastTurnPlayer
+      const next = queued ?? nextAlive(s, regular)
       if (next === null) gameOver(ctx, { winners: [], reason: 'noAlivePlayers' })
       yield* runEvent(ctx, { kind: 'Turn', player: next })
+      // 额外回合(turnQueue 出队)不改变座位序:之后仍从原回合玩家的下家继续。
+      // 开局尚无常规回合(lastTurnPlayer 为 null)时出队的回合即首个回合,由它确立座位序
+      if (queued !== undefined && regular !== null) s.lastTurnPlayer = regular
     }
   } catch (e) {
     if (e instanceof GameOver) return
@@ -92,7 +97,7 @@ export function* onTurn(ctx: Ctx, ev: TurnEvent): Flow<void> {
   }
 }
 
-/** Phase:skipPhases / Phase.before 取消 ⇒ Phase.skipped;否则 Phase.start → 正文 → Phase.end;finally 清理 @phase 标记 */
+/** Phase:skipPhases / Phase.before 取消 ⇒ Phase.skipped;否则 Phase.start → 正文 → Phase.end;两条路径都清理 @phase 标记 */
 export function* onPhase(ctx: Ctx, ev: PhaseEvent): Flow<void> {
   const t = ctx.state.turn
   if (t === null) throw new EngineError('Phase 事件必须在 Turn 内运行')
@@ -107,6 +112,8 @@ export function* onPhase(ctx: Ctx, ev: PhaseEvent): Flow<void> {
       eventId: ev.id,
     })
     yield* stage(ctx, 'Phase.skipped', ev)
+    // 被跳过的阶段同样到此结束:Phase.before 写入的 @phase 标记不得漏到后续阶段
+    clearScopedFlags(ctx.state, '@phase')
     return
   }
   t.phase = ev.phase
@@ -118,7 +125,8 @@ export function* onPhase(ctx: Ctx, ev: PhaseEvent): Flow<void> {
   })
   try {
     if (!(yield* stage(ctx, 'Phase.start', ev))) return
-    yield* PHASE_BODY[ev.phase](ctx, ev)
+    // 回合玩家在 Phase.before / Phase.start 时机死亡:不执行正文(Phase.end 照常,与正文中途死亡一致)
+    if (playerOf(ctx, ev.player).alive) yield* PHASE_BODY[ev.phase](ctx, ev)
     yield* stage(ctx, 'Phase.end', ev)
   } finally {
     clearScopedFlags(ctx.state, '@phase')
@@ -136,13 +144,15 @@ function* judgePhase(ctx: Ctx, ev: PhaseEvent): Flow<void> {
     if (!playerOf(ctx, p).alive) break
     const z = zoneOf(ctx.state, card)
     if (z.kind !== 'judge' || z.player !== p) continue
-    const def = ctx.registry.card(ctx.registry.spec(card).name)
-    if (def === null) throw new EngineError(`判定区的牌 ${card} 未注册`)
+    // 转化而来的延时锦囊(国色当乐)按记录的牌名结算;须在移出判定区(清除记录)之前取
+    const face = judgeFaceOf(ctx, p, card)
+    const def = ctx.registry.card(face.name)
+    if (def === null) throw new EngineError(`判定区的牌 ${card}(${face.name})未注册`)
     yield* moveCards(ctx, [{ card, to: { kind: 'processing' }, reason: 'delayed_trick' }])
     yield* runEvent(ctx, {
       kind: 'CardEffect',
       useId: null,
-      card: faceOf(ctx, card),
+      card: face,
       source: null,
       target: p,
       delayed: true,

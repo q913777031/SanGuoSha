@@ -320,6 +320,7 @@ describe('moveCards:原子移动、from / visibleTo 推导与日志分组', () =
       reason: 'discard',
       position: 'top',
       visibleTo: null,
+      as: null,
     })
     expect(ev.moves[1]?.from).toEqual({ kind: 'draw' })
     expect(ev.moves[1]?.visibleTo).toEqual([0])

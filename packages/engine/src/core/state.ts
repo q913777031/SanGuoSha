@@ -55,6 +55,7 @@ export function createInitialState(config: GameConfig, registry: Registry): Game
       hand: [],
       equips: { weapon: null, armor: null, horse_offensive: null, horse_defensive: null },
       judgeArea: [],
+      judgeAs: {},
       skills: [],
       flags: {},
       marks: {},
@@ -201,6 +202,13 @@ export function faceOf(ctx: Ctx, card: CardId): CardFace {
   return { name: spec.name, suit: spec.suit, number: spec.number, subcards: [card], viewAs: null }
 }
 
+/** 判定区中一张牌的牌面:转化而来的(国色当乐)按 judgeAs 记录的牌名,其余同 faceOf;转化来源技能不记录 */
+export function judgeFaceOf(ctx: Ctx, player: PlayerId, card: CardId): CardFace {
+  const face = faceOf(ctx, card)
+  const as = playerOf(ctx, player).judgeAs[String(card)]
+  return as === undefined ? face : { ...face, name: as }
+}
+
 /** CardFace 的纯数据快照(写日志用) */
 export function faceToJson(face: CardFace): JsonValue {
   return {
@@ -331,15 +339,25 @@ export function usableCards(ctx: Ctx, player: PlayerId): UsableCard[] {
   return result
 }
 
+/** 技能选牌约束:zones(缺省 ['hand'])内被 accept 的牌,手牌序,再按槽序的装备;候选与校验共用 */
 function cardSelectionFor(
   ctx: Ctx,
   player: PlayerId,
+  zones: ReadonlyArray<'hand' | 'equip'> | undefined,
   min: number,
   max: number,
   accept: (card: CardId) => boolean,
 ): CardSelection {
-  const candidates = playerOf(ctx, player).hand.filter(accept)
-  return { candidates, min, max }
+  const p = playerOf(ctx, player)
+  const from = zones ?? ['hand']
+  const pool = from.includes('hand') ? [...p.hand] : []
+  if (from.includes('equip')) {
+    for (const slot of EQUIP_SLOTS) {
+      const card = p.equips[slot]
+      if (card !== null) pool.push(card)
+    }
+  }
+  return { candidates: pool.filter(accept), min, max }
 }
 
 /** 出牌阶段可发动的主动技 / 转化技及其选牌、选目标约束(M3;M1 恒为空) */
@@ -348,8 +366,13 @@ export function usableSkills(ctx: Ctx, player: PlayerId): UsableSkill[] {
   for (const skill of skillsOf(ctx, player)) {
     if (skill.type === 'active') {
       if (!skill.canUse(ctx, player)) continue
-      const cards = cardSelectionFor(ctx, player, skill.cards.min, skill.cards.max, (card) =>
-        skill.cards.filter(ctx, player, card, []),
+      const cards = cardSelectionFor(
+        ctx,
+        player,
+        skill.cards.zones,
+        skill.cards.min,
+        skill.cards.max,
+        (card) => skill.cards.filter(ctx, player, card, []),
       )
       if (cards.candidates.length < cards.min) continue
       const candidates = ctx.state.players
@@ -367,15 +390,18 @@ export function usableSkills(ctx: Ctx, player: PlayerId): UsableSkill[] {
       for (const as of skill.produces) {
         const def = ctx.registry.card(as)
         if (def === null || !skill.enabledAtPlay(ctx, player, as)) continue
+        const face: CardFace = { name: as, suit: 'none', number: 0, subcards: [], viewAs: skill.id }
+        // 与 usableCards 一致:出杀次数(useLimit)等使用条件同样约束转化牌
+        if (def.canUse && !def.canUse(ctx, player, face)) continue
         const cards = cardSelectionFor(
           ctx,
           player,
+          skill.zones,
           skill.cardCount[0],
           skill.cardCount[1],
           (card) => skill.cardFilter(ctx, player, card, [], as),
         )
         if (cards.candidates.length < cards.min) continue
-        const face: CardFace = { name: as, suit: 'none', number: 0, subcards: [], viewAs: skill.id }
         const targets =
           def.target.auto !== null
             ? { candidates: [], min: 0, max: 0 }
@@ -419,8 +445,13 @@ export function viewAsOptions(
     if (skill.type !== 'viewAs') continue
     const as = viewAsTarget(ctx, skill, pattern)
     if (as === null || !skill.enabledAtResponse(ctx, player, pattern, mode)) continue
-    const cards = cardSelectionFor(ctx, player, skill.cardCount[0], skill.cardCount[1], (card) =>
-      skill.cardFilter(ctx, player, card, [], as),
+    const cards = cardSelectionFor(
+      ctx,
+      player,
+      skill.zones,
+      skill.cardCount[0],
+      skill.cardCount[1],
+      (card) => skill.cardFilter(ctx, player, card, [], as),
     )
     if (cards.candidates.length < cards.min) continue
     result.push({ skill: skill.id, cards })

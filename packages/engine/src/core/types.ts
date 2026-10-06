@@ -18,7 +18,8 @@
  *  - CardSpec 增加 type(由 DeckEntry.kind 派生),使 matchPattern 不依赖 CardDef;
  *  - Ctx 增加 onTurnBoundary()(回合边界快照回调)与 guard(未消费 Flow 检测);
  *  - 增加 AnyEventDraft / AnyRequestDraft 联合,让 runEvent / ask 能从字面量推断 kind;
- *  - 增加 TIMINGS 运行时常量,供 registry 校验 timings。
+ *  - 增加 TIMINGS 运行时常量,供 registry 校验 timings;
+ *  - M1 评审修订(judgeAs、BuiltinTimingEventMap 与 ContentPackage.timings、技能选牌 zones)见 ENGINE_DESIGN.md §16。
  */
 
 // ═══════════════════════════ 0. 基础标识与常量 ═══════════════════════════
@@ -70,8 +71,8 @@ export const EQUIP_SLOTS: readonly EquipSlot[] = [
 
 /** "无限次"的数值表示。禁止 Infinity 进入状态或协议(JSON 会把它变成 null) */
 export const UNLIMITED = 1_000_000
-/** GameState 结构版本;存档/回放头部携带,不一致即拒绝恢复 */
-export const STATE_SCHEMA_VERSION = 1
+/** GameState 结构版本;存档/回放头部携带,不一致即拒绝恢复(2:PlayerState 增加 judgeAs) */
+export const STATE_SCHEMA_VERSION = 2
 
 /** 纯 JSON 值:状态、日志、标记的唯一允许形态 */
 export type JsonValue =
@@ -160,6 +161,8 @@ export interface CardMove {
   position: 'top' | 'bottom'
   /** 该移动对谁可见(日志 / 视图据此遮蔽 card);null = 公开 */
   visibleTo: PlayerId[] | null
+  /** 进入判定区后视为哪张延时锦囊(见 CardMoveDraft.as);未给出为 null */
+  as: CardName | null
 }
 
 /** moveCards 的入参:from / visibleTo 由引擎推导,position 缺省 'top' */
@@ -168,6 +171,11 @@ export interface CardMoveDraft {
   to: Zone
   reason: MoveReason
   position?: 'top' | 'bottom'
+  /**
+   * 仅对 to.kind === 'judge' 有意义:牌在判定区中视为的延时锦囊名(国色把方块牌当乐不思蜀)。
+   * 延时锦囊进入判定区时传 eff.card.name(含闪电传递);与实体牌名不同才记入 PlayerState.judgeAs。
+   */
+  as?: CardName
 }
 
 // ═══════════════════════════ 2. 玩家与对局状态 ═══════════════════════════
@@ -190,6 +198,11 @@ export interface PlayerState {
   equips: Record<EquipSlot, CardId | null>
   /** 判定区:末尾 = 最后放置 = 最先判定 */
   judgeArea: CardId[]
+  /**
+   * 判定区中转化而来的牌视为的延时锦囊名:key = String(CardId);未列出的按实体牌名。
+   * 进入判定区时按 CardMoveDraft.as 写入、离开时清除;只做 key 读写、不遍历。
+   */
+  judgeAs: Record<string, CardName>
   /** 武将技能(含被赋予的技能);装备技能由 equips 现算,不在此列 */
   skills: SkillId[]
   /**
@@ -466,12 +479,11 @@ export type EventDraft<E extends GameEvent> = Omit<E, 'id' | 'parentId' | 'cance
 export type AnyEventDraft = { [K in EventKind]: EventDraft<EventOf<K>> }[EventKind]
 
 /**
- * 时机点 → 事件类型 的映射。Timing 由它派生,所以:
- *  - 新增时机 = 在此加一行(内容包可用 declare module 合并声明自定义时机,如 'Slash.missed');
- *  - TriggerSkill<T> 的 canTrigger / effect 自动按时机收窄事件类型,技能代码无需 cast。
- * 各时机在 handler 中的触发顺序见 ENGINE_DESIGN.md §3.2,并由快照测试锁住。
+ * 内置时机 → 事件类型(核心 handler 触发的全部时机)。各时机在 handler 中的触发顺序见
+ * ENGINE_DESIGN.md §3.2,并由快照测试锁住。用类型别名而非接口:别名不参与声明合并,
+ * TIMING_TABLE 按它穷举,不受内容包新增的时机影响。
  */
-export interface TimingEventMap {
+type BuiltinTimingEventMap = {
   'Game.start': GameStartEvent
   'Turn.start': TurnEvent
   'Turn.end': TurnEvent
@@ -514,11 +526,22 @@ export interface TimingEventMap {
   'Judge.result': JudgeEvent
   'Judge.after': JudgeEvent
 }
-/** 时机点(由 TimingEventMap 的键派生,拼错即编译错误) */
-export type Timing = keyof TimingEventMap
 
-/** 全部时机的运行时表(与 TimingEventMap 一一对应,缺项即编译错误),供 registry 校验 */
-const TIMING_TABLE: Record<Timing, true> = {
+/**
+ * 时机点 → 事件类型 的映射。Timing 由它派生,所以:
+ *  - 新增内置时机 = 在 BuiltinTimingEventMap 加一行;内容包用 declare module 合并本接口声明自定义时机
+ *    (如 'Slash.missed'),并在 ContentPackage.timings 登记;
+ *  - TriggerSkill<T> 的 canTrigger / effect 自动按时机收窄事件类型,技能代码无需 cast。
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- 声明合并入口,不能改为类型别名
+export interface TimingEventMap extends BuiltinTimingEventMap {}
+/** 时机点(由 TimingEventMap 的键派生,拼错即编译错误;含内容包合并的自定义时机) */
+export type Timing = keyof TimingEventMap
+/** 内置时机(不含内容包合并的自定义时机) */
+type BuiltinTiming = keyof BuiltinTimingEventMap
+
+/** 全部内置时机的运行时表(与 BuiltinTimingEventMap 一一对应,缺项即编译错误),供 registry 建索引与校验 */
+const TIMING_TABLE: Record<BuiltinTiming, true> = {
   'Game.start': true,
   'Turn.start': true,
   'Turn.end': true,
@@ -561,8 +584,8 @@ const TIMING_TABLE: Record<Timing, true> = {
   'Judge.result': true,
   'Judge.after': true,
 }
-/** 全部时机(声明序);仅用于校验与测试夹具,引擎不按它排序 */
-export const TIMINGS: readonly Timing[] = Object.keys(TIMING_TABLE) as Timing[]
+/** 全部内置时机(声明序);仅用于校验与测试夹具,引擎不按它排序 */
+export const TIMINGS: readonly Timing[] = Object.keys(TIMING_TABLE) as BuiltinTiming[]
 
 // ═══════════════════════════ 4. Request / Response(唯一交互出口) ═══════════════════════════
 
@@ -949,6 +972,8 @@ export interface ActiveSkill extends SkillBase {
   cards: {
     min: number
     max: number
+    /** 可选牌的区域,缺省 ['hand'](制衡 / 离间可含 'equip');候选为手牌序,再按槽序的装备 */
+    zones?: Array<'hand' | 'equip'>
     filter(ctx: Ctx, owner: PlayerId, card: CardId, selected: CardId[]): boolean
   }
   targets: {
@@ -965,6 +990,8 @@ export interface ViewAsSkill extends SkillBase {
   /** 可转化出的牌名;引擎据此枚举 PlayRequest.usableSkills 与 AskCard 的 viewAsSkills */
   produces: CardName[]
   cardCount: [number, number]
+  /** 可选牌的区域,缺省 ['hand'](武圣 / 国色 / 奇袭 / 急救含 'equip');候选为手牌序,再按槽序的装备 */
+  zones?: Array<'hand' | 'equip'>
   enabledAtPlay(ctx: Ctx, owner: PlayerId, as: CardName): boolean
   enabledAtResponse(ctx: Ctx, owner: PlayerId, pattern: CardPattern, mode: CardUseMode): boolean
   cardFilter(ctx: Ctx, owner: PlayerId, card: CardId, selected: CardId[], as: CardName): boolean
@@ -1064,6 +1091,8 @@ export interface ContentPackage {
   skills?: SkillDef[]
   generals?: GeneralDef[]
   modes?: ModeDef[]
+  /** 本包经 declare module 合并进 TimingEventMap 的自定义时机(如 'Slash.missed'):registry 据此建索引并校验 */
+  timings?: Timing[]
 }
 
 /** 注册表构建器:setDeck → use → build */
@@ -1088,6 +1117,8 @@ export interface PublicPlayerView {
   handCount: number
   equips: Record<EquipSlot, CardId | null>
   judgeArea: CardId[]
+  /** 判定区中转化而来的牌视为的延时锦囊名(同 PlayerState.judgeAs,公开信息) */
+  judgeAs: Record<string, CardName>
   /** 'hidden' = 按模式规则对 viewer 不可见 */
   role: Role | 'hidden'
   roleRevealed: boolean

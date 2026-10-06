@@ -101,6 +101,7 @@ export function viewFor(ctx: Ctx, viewer: PlayerId, pending: Request | null): Pl
     handCount: p.hand.length,
     equips: { ...p.equips },
     judgeArea: [...p.judgeArea],
+    judgeAs: { ...p.judgeAs },
     role: p.id === viewer || mode.roleVisible(ctx, viewer, p.id) ? p.role : 'hidden',
     roleRevealed: p.roleRevealed,
     skills: skillsOf(ctx, p.id).map((skill) => skill.id),

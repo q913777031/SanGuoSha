@@ -36,9 +36,14 @@ import type {
 import { applyMoves, drawFromPile, moveCards, zoneOf } from '../core/zones.js'
 import { byName } from '../cards/pattern.js'
 
-/** DrawCards:DrawCards.before(改量 / 取消)→ 逐张从牌堆顶摸入手牌 → DrawCards.after */
+/** DrawCards:DrawCards.before(改量 / 取消)→ [已死亡 ⇒ 取消] → 逐张从牌堆顶摸入手牌 → DrawCards.after */
 export function* onDrawCards(ctx: Ctx, ev: DrawCardsEvent): Flow<void> {
   if (!(yield* stage(ctx, 'DrawCards.before', ev))) return
+  // 已死亡(含在 DrawCards.before 时机死亡)的角色不摸牌:否则牌会永远留在死者手里
+  if (!playerOf(ctx, ev.player).alive) {
+    ev.cancelled = true
+    return
+  }
   if (ev.count > 0) {
     const cards = yield* drawFromPile(ctx, ev.player, ev.count)
     ev.cards.push(...cards)
