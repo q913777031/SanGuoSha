@@ -9,7 +9,8 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:artifact": "ARTIFACT=1 vite build && node scripts/build-artifact.mjs"
   },
   "dependencies": {
     "@sgs/ai": "workspace:*",

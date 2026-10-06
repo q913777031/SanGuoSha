@@ -43,7 +43,14 @@ const deterministicCore = {
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', '**/dev-dist/**', 'docs/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      '**/dev-dist/**',
+      '**/dist-artifact/**',
+      'docs/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
